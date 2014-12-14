@@ -2,7 +2,9 @@
 -- EECS 776 final project: Scrabble
 -- You should probably not distribute this software because some lawyers might get mad
 
+import Control.Monad
 import Data.Char
+import Data.List
 import Data.List.Split
 import System.Random
 
@@ -11,6 +13,7 @@ data ScrabbleGame = ScrabbleGame { board :: [[Char]]
                                  , racks :: [[Char]]
                                  , scores :: [Int]
                                  , bag :: [Char]
+                                 , turn :: Int
                                  } deriving (Show)
 
 -- remove element from a list by index
@@ -31,12 +34,12 @@ letterset = concatMap (uncurry $ concatMap . replicate)
 letterscore c
     | elem c "QZ"         = 10
     | elem c "JX"         = 8
-    | c == 'K'            = 5
+    | elem c "K"          = 5
     | elem c "FHVWY"      = 4
     | elem c "BCMP"       = 3
     | elem c "DG"         = 2
     | elem c "EAIONRTLSU" = 1
-    | c == '_'            = 0
+    | elem c "_"          = 0
 
 -- newgame p: set up a new board with p players
 newgame :: Int -> StdGen -> ScrabbleGame
@@ -47,20 +50,32 @@ newgame p g =
                      , racks = take p bag
                      , scores = replicate p 0
                      , bag = concat $ drop p bag
+                     , turn = 1
                      }
 
 -- printgame sg p: print the game board and the rack for player p
 printgame :: ScrabbleGame -> Int -> IO ()
 printgame sg p = do
     putStrLn boardedge
-    mapM putStrLn $ map (\n -> boardrow (board sg !! (n - 1)) n) [1..15]
+    mapM putStrLn [ boardrow sg (board sg !! (n - 1)) n | n <- [1..15] ]
     putStrLn boardedge
+    putStrLn $ "P" ++ show (turn sg) ++ ": " ++ rackformat (racks sg !! ((turn sg) - 1))
+
+rackformat s = concat $ intersperse " " [ [c] ++ "(" ++ show (letterscore c) ++ ")" | c <- s ]
 
 boardedge = "+" ++ (replicate 30 '-') ++ "+"
 
 -- in these functions, n = row, m = column (starting at 1!)
-boardrow :: String -> Int -> String
-boardrow r n = "|" ++ concatMap (\m -> boardcell (r !! (m - 1)) n m) [1..15] ++ "|"
+boardrow :: ScrabbleGame -> String -> Int -> String
+boardrow sg r n = "|" ++ concat [ boardcell (r !! (m - 1)) n m | m <- [1..15] ] ++ "|" ++ (extradata sg n)
+
+extradata :: ScrabbleGame -> Int -> String
+extradata sg r
+    -- show player names above scores
+    | r == 3 = (++) "  " $ concat $ intersperse " " [ leftpad ("P" ++ show p) 4 | p <- [1..length $ racks sg] ]
+    -- show scores
+    | r == 4 = (++) "  " $ concat $ intersperse " " [ leftpad (show score) 4 | score <- scores sg ]
+    | otherwise = ""
 
 boardcell :: Char -> Int -> Int -> String
 boardcell c n m
@@ -110,7 +125,13 @@ colorend = "\x1b[0m"
 fullwidth :: Char -> Char
 fullwidth = (chr . (65248+) . ord)
 
+leftpad s n = (replicate (n - length s) ' ') ++ s
+
 main = do
+    putStr "How many players? "
+    num_players <- getLine
+    when (read num_players < 1) $ error "too few players"
+    when (read num_players > 4) $ error "too many players"
     g <- getStdGen
-    let game = newgame 2 g
+    let game = newgame (read num_players) g
     printgame game 0
