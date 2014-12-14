@@ -6,6 +6,7 @@ import Control.Monad
 import Data.Char
 import Data.List
 import Data.List.Split
+import System.IO
 import System.Random
 
 -- Type for storing the Scrabble game state
@@ -137,6 +138,7 @@ getcommand :: IO Command
 getcommand = do
     putStrLn "Commands: quit"
     putStr "> "
+    hFlush stdout
     command_str <- getLine
     case (map toLower command_str) of
         "quit" -> return Quit
@@ -151,6 +153,7 @@ gameloop sg = do
 
 main = do
     putStr "How many players? "
+    hFlush stdout
     num_players <- getLine
     when (read num_players < 1) $ error "too few players"
     when (read num_players > 4) $ error "too many players"
