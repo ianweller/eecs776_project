@@ -14,7 +14,7 @@ data ScrabbleGame = ScrabbleGame { board :: [[Char]]
                                  } deriving (Show)
 
 -- remove element from a list by index
-removeElement n xs = (\(l,r) -> l ++ drop 1 r) $ splitAt n xs
+removeElement n xs = [ xs !! (x - 1) | x <- [1..length xs], x - 1 /= n ]
 
 -- randomly shuffle a list
 shuffle :: [a] -> StdGen -> [a]
@@ -58,10 +58,57 @@ printgame sg p = do
 
 boardedge = "+" ++ (replicate 30 '-') ++ "+"
 
+-- in these functions, n = row, m = column (starting at 1!)
 boardrow :: String -> Int -> String
-boardrow r n = "|" ++ r ++ "|"
+boardrow r n = "|" ++ concatMap (\m -> boardcell (r !! (m - 1)) n m) [1..15] ++ "|"
 
-fullwidth s = s
+boardcell :: Char -> Int -> Int -> String
+boardcell c n m
+    | c == ' ' && n == 8 && m == 8 = boardcolor "\xff0a" n m
+    | c == ' '                     = boardcolor "  " n m
+    | otherwise                    = [fullwidth c]
+
+boardcolor :: String -> Int -> Int -> String
+boardcolor s n m = colorstr s (cellcolor n m)
+
+data Bonus = DoubleWord | TripleWord | DoubleLetter | TripleLetter
+
+cellbonus :: Int -> Int -> Maybe Bonus
+cellbonus n m
+    | n == 8 && m == 8                             = Just DoubleWord
+    | elem n [2,14] && elem m [2,14]               = Just DoubleWord
+    | elem n [1,8,15] && elem m [1,8,15]           = Just TripleWord
+    | elem n [2,6,10,14] && elem m [2,6,10,14]     = Just TripleLetter
+    | elem n [7,9] && elem m [7,9]                 = Just DoubleLetter
+    | n == m                                       = Just DoubleWord
+    | n == (16 - m)                                = Just DoubleWord
+    | elem n [1,4,8,12,15] && elem m [1,4,8,12,15] = Just DoubleLetter
+    | elem n [3,7,9,13] && elem m [3,7,9,13]       = Just DoubleLetter
+    | otherwise                                    = Nothing
+
+bonuscolor (Just DoubleWord) = Just Pink
+bonuscolor (Just TripleWord) = Just Red
+bonuscolor (Just DoubleLetter) = Just Cyan
+bonuscolor (Just TripleLetter) = Just Blue
+bonuscolor Nothing = Nothing
+
+cellcolor n m = bonuscolor $ cellbonus n m
+
+----------------------------------------
+-- character rendering functions / stuff
+data Color = Pink | Red | Cyan | Blue | White
+
+colorstr s (Just c) = (colorstart c) ++ s ++ colorend
+colorstr s Nothing = s
+colorstart Pink = "\x1b[45m"
+colorstart Red = "\x1b[41m"
+colorstart Cyan = "\x1b[46m"
+colorstart Blue = "\x1b[44m"
+colorstart White = "\x1b[47m"
+colorend = "\x1b[0m"
+
+fullwidth :: Char -> Char
+fullwidth = (chr . (65248+) . ord)
 
 main = do
     g <- getStdGen
