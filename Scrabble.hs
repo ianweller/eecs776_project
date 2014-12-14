@@ -75,6 +75,8 @@ extradata sg r
     | r == 3 = (++) "  " $ concat $ intersperse " " [ leftpad ("P" ++ show p) 4 | p <- [1..length $ racks sg] ]
     -- show scores
     | r == 4 = (++) "  " $ concat $ intersperse " " [ leftpad (show score) 4 | score <- scores sg ]
+    -- letters remaining
+    | r == 6 = (++) "  " $ "Letters remaining: " ++ show (length $ bag sg)
     | otherwise = ""
 
 boardcell :: Char -> Int -> Int -> String
@@ -127,11 +129,30 @@ fullwidth = (chr . (65248+) . ord)
 
 leftpad s n = (replicate (n - length s) ' ') ++ s
 
+----------------------------------------
+
+data Command = Quit
+
+getcommand :: IO Command
+getcommand = do
+    putStrLn "Commands: quit"
+    putStr "> "
+    command_str <- getLine
+    case (map toLower command_str) of
+        "quit" -> return Quit
+        _ -> do { putStrLn "Invalid command."; getcommand }
+
+gameloop :: ScrabbleGame -> IO ()
+gameloop sg = do
+    printgame sg 0
+    command <- getcommand
+    case command of
+        Quit -> return ()
+
 main = do
     putStr "How many players? "
     num_players <- getLine
     when (read num_players < 1) $ error "too few players"
     when (read num_players > 4) $ error "too many players"
     g <- getStdGen
-    let game = newgame (read num_players) g
-    printgame game 0
+    gameloop $ newgame (read num_players) g
