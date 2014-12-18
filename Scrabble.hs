@@ -15,7 +15,7 @@ data ScrabbleGame = ScrabbleGame { board :: [[Char]]
                                  , scores :: [Int]
                                  , bag :: [Char]
                                  , turn :: Int
-                                 } deriving (Show)
+                                 } deriving (Show,Eq,Ord)
 
 -- remove element from a list by index
 removeElement n xs = [ xs !! (x - 1) | x <- [1..length xs], x - 1 /= n ]
@@ -42,6 +42,12 @@ letterscore c
     | elem c "EAIONRTLSU" = 1
     | elem c "_"          = 0
 
+validwords :: IO [String]
+validwords = do
+    let validword s = and [all (flip elem ['a'..'z']) s,length s <= 15]
+    f <- readFile "/usr/share/dict/words"
+    return $ filter validword $ lines f
+
 -- newgame p: set up a new board with p players
 newgame :: Int -> StdGen -> ScrabbleGame
 newgame p g =
@@ -54,21 +60,35 @@ newgame p g =
                      , turn = 1
                      }
 
+currentrack :: ScrabbleGame -> [Char]
+currentrack sg = racks sg !! ((turn sg) - 1)
+
+validplay :: ScrabbleGame -> Play -> Bool
+validplay sg (Play word (x,y) dir)
+    | board sg == (replicate 15 $ replicate 15 ' ') = validfirstplay sg (Play word (x,y) dir)
+    | otherwise =
+        False
+
+validfirstplay :: ScrabbleGame -> Play -> Bool
+validfirstplay sg (Play word (x,y) dir) =
+    True -- WORK ON THIS NEXT
+
 -- printgame sg p: print the game board and the rack for player p
 printgame :: ScrabbleGame -> Int -> IO ()
 printgame sg p = do
+    putStrLn $ "    " ++ map fullwidth ['a'..'o']
     putStrLn boardedge
     mapM putStrLn [ boardrow sg (board sg !! (n - 1)) n | n <- [1..15] ]
     putStrLn boardedge
-    putStrLn $ "P" ++ show (turn sg) ++ ": " ++ rackformat (racks sg !! ((turn sg) - 1))
+    putStrLn $ "P" ++ show (turn sg) ++ ": " ++ rackformat (currentrack sg)
 
 rackformat s = concat $ intersperse " " [ [c] ++ "(" ++ show (letterscore c) ++ ")" | c <- s ]
 
-boardedge = "+" ++ (replicate 30 '-') ++ "+"
+boardedge = "   +" ++ (replicate 30 '-') ++ "+"
 
 -- in these functions, n = row, m = column (starting at 1!)
 boardrow :: ScrabbleGame -> String -> Int -> String
-boardrow sg r n = "|" ++ concat [ boardcell (r !! (m - 1)) n m | m <- [1..15] ] ++ "|" ++ (extradata sg n)
+boardrow sg r n = (if (n < 10) then " " ++ (show n) else show n) ++ " |" ++ concat [ boardcell (r !! (m - 1)) n m | m <- [1..15] ] ++ "|" ++ (extradata sg n)
 
 extradata :: ScrabbleGame -> Int -> String
 extradata sg r
@@ -132,24 +152,45 @@ leftpad s n = (replicate (n - length s) ' ') ++ s
 
 ----------------------------------------
 
-data Command = Quit
+data Direction = Horizontal | Vertical
+    deriving (Show,Eq,Ord)
+data Command = QuitCommand | PlayCommand
+data Play = Play { word :: String
+                 , xy :: (Char,Int)
+                 , dir :: Direction
+                 } deriving (Show,Eq,Ord)
 
-getcommand :: IO Command
-getcommand = do
-    putStrLn "Commands: quit"
+getcommanderror :: String -> ScrabbleGame -> [String] -> IO Command
+getcommanderror msg sg dict = do
+    putStrLn msg
+    getcommand sg dict
+invalidcommand = getcommanderror "Invalid command."
+
+getcommand :: ScrabbleGame -> [String] -> IO Command
+getcommand sg dict = do
+    putStrLn "Commands: play [word] x y | quit"
     putStr "> "
     hFlush stdout
     command_str <- getLine
-    case (map toLower command_str) of
-        "quit" -> return Quit
-        _ -> do { putStrLn "Invalid command."; getcommand }
+    let command = words $ map toLower command_str
+    if length command > 0
+        then case (command !! 0) of
+            "quit" -> return QuitCommand
+            "play" -> do
+                if length command == 4
+                    then if elem (command !! 1) dict
+                        then return QuitCommand
+                        else getcommanderror ((command !! 1) ++ " is not a valid word.") sg dict
+                    else invalidcommand sg dict
+            _ -> invalidcommand sg dict
+        else invalidcommand sg dict
 
-gameloop :: ScrabbleGame -> IO ()
-gameloop sg = do
+gameloop :: ScrabbleGame -> [String] -> IO ()
+gameloop sg dict = do
     printgame sg 0
-    command <- getcommand
+    command <- getcommand sg dict
     case command of
-        Quit -> return ()
+        QuitCommand -> return ()
 
 main = do
     putStr "How many players? "
@@ -158,4 +199,5 @@ main = do
     when (read num_players < 1) $ error "too few players"
     when (read num_players > 4) $ error "too many players"
     g <- getStdGen
-    gameloop $ newgame (read num_players) g
+    dict <- validwords
+    gameloop (newgame (read num_players) g) dict
