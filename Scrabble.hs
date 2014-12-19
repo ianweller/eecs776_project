@@ -2,10 +2,13 @@
 -- EECS 776 final project: Scrabble
 -- You should probably not distribute this software because some lawyers might get mad
 
+import Control.Applicative
 import Control.Monad
 import Data.Char
+import Data.Either
 import Data.List
 import Data.List.Split
+import Data.Maybe
 import System.IO
 import System.Random
 
@@ -15,7 +18,33 @@ data ScrabbleGame = ScrabbleGame { board :: [[Char]]
                                  , scores :: [Int]
                                  , bag :: [Char]
                                  , turn :: Int
-                                 } deriving (Show,Eq,Ord)
+                                 , dict :: [String]
+                                 } deriving (Eq,Ord)
+
+instance Show ScrabbleGame where
+    show sg = concat $ intersperse "\n" (["    " ++ map fullwidth ['a'..'o'],boardedge]
+                                      ++ [ boardrow (board sg !! (n - 1)) n | n <- [1..15] ]
+                                      ++ [boardedge,"P" ++ show (turn sg) ++ ": " ++ rackformat (currentrack sg)])
+              where boardedge = "   +" ++ (replicate 30 '-') ++ "+"
+                    rackformat s = concat $ intersperse " " [ [c] ++ "(" ++ show (letterscore c) ++ ")" | c <- s ]
+                    -- in these functions, n = row, m = column (starting at 1!)
+                    -- i have no idea why n comes before m. i was not very awake when writing those bits apparently
+                    boardrow r n = concat [if (n < 10) then " " ++ (show n) else show n," |"
+                                             , concat [ boardcell (r !! (m - 1)) n m | m <- [1..15] ],"|"
+                                             , (extradata n)]
+                    extradata r
+                        -- show player names above scores
+                        | r == 3 = (++) "  " $ concat $ intersperse " " [ leftpad ("P" ++ show p) 4 | p <- [1..length $ racks sg] ]
+                        -- show scores
+                        | r == 4 = (++) "  " $ concat $ intersperse " " [ leftpad (show score) 4 | score <- scores sg ]
+                        -- letters remaining
+                        | r == 6 = (++) "  " $ "Letters remaining: " ++ show (length $ bag sg)
+                        | otherwise = ""
+                    boardcell c n m
+                        | c == ' ' && n == 8 && m == 8 = boardcolor "\xff0a" n m
+                        | c == ' '                     = boardcolor "  " n m
+                        | otherwise                    = [fullwidth c]
+                    boardcolor s n m = colorstr s (cellcolor n m)
 
 -- remove element from a list by index
 removeElement n xs = [ xs !! (x - 1) | x <- [1..length xs], x - 1 /= n ]
@@ -28,11 +57,9 @@ shuffle xs g =
     in  xs !! n : shuffle (removeElement n xs) g
 
 -- the letter set
--- in racks, blanks are represented with '_', but are represented on the board
--- by the lowercase form of the letter.
 letterset = concatMap (uncurry $ concatMap . replicate)
-    [(1,"KJXQX"),(2,"_BCMPFHVWY"),(3,"G"),(4,"LSUD"),(6,"NRT"),(8,"O"),(9,"AI"),(12,"E")]
-letterscore c
+    [(1,"KJXQX"),(2,"BCMPFHVWY"),(3,"G"),(4,"LSUD"),(6,"NRT"),(8,"O"),(9,"AI"),(12,"E")]
+_letterscore c
     | elem c "QZ"         = 10
     | elem c "JX"         = 8
     | elem c "K"          = 5
@@ -40,8 +67,9 @@ letterscore c
     | elem c "BCMP"       = 3
     | elem c "DG"         = 2
     | elem c "EAIONRTLSU" = 1
-    | elem c "_"          = 0
+letterscore = (_letterscore . toUpper)
 
+-- this isn't the OSPD but it'll do. maybe
 validwords :: IO [String]
 validwords = do
     let validword s = and [all (flip elem ['a'..'z']) s,length s <= 15]
@@ -49,8 +77,8 @@ validwords = do
     return $ filter validword $ lines f
 
 -- newgame p: set up a new board with p players
-newgame :: Int -> StdGen -> ScrabbleGame
-newgame p g =
+newgame :: Int -> StdGen -> [String] -> ScrabbleGame
+newgame p g words =
     --let bag = chunksOf 7 $ shuffle letterset
     let bag = chunksOf 7 (shuffle letterset g)
     in  ScrabbleGame { board = replicate 15 $ replicate 15 ' '
@@ -58,79 +86,76 @@ newgame p g =
                      , scores = replicate p 0
                      , bag = concat $ drop p bag
                      , turn = 1
+                     , dict = words
                      }
 
 currentrack :: ScrabbleGame -> [Char]
 currentrack sg = racks sg !! ((turn sg) - 1)
 
-validplay :: ScrabbleGame -> Play -> Bool
-validplay sg (Play word (x,y) dir)
-    | board sg == (replicate 15 $ replicate 15 ' ') = validfirstplay sg (Play word (x,y) dir)
+scoreplay :: ScrabbleGame -> Play -> Either String Int
+scoreplay sg (Play word (x,y) dir)
+    | board sg == (replicate 15 $ replicate 15 ' ') = scorefirstplay sg (Play word (x,y) dir)
     | otherwise =
-        False
+        Left "Not implemented yet."
 
-validfirstplay :: ScrabbleGame -> Play -> Bool
-validfirstplay sg (Play word (x,y) dir) =
-    True -- WORK ON THIS NEXT
+scorefirstplay :: ScrabbleGame -> Play -> Either String Int
+scorefirstplay sg (Play word (x,y) dir) =
+    if errormsg == Nothing
+        then fromMaybe (Left $ "\"" ++ word ++ "\" is not a valid word.") $ Right <$> scoreword sg word (colnum x) y dir
+        else Left $ fromMaybe "Internal scoring error." errormsg
+    where n = colnum x
+          errorchecks = [ (dir == Horizontal,"The first play must be horizontal.")
+                        , (y == 8,"The first play must be on row 8.")
+                        , (n > 0 && n + (length word) <= 16,"The word would fall off the board.")
+                        , (n <= 8 && n + (length word) >= 9,"The first play must cover the square h8.")
+                        , (length word > 0,"You somehow entered a 0-length word and we are all confused.")
+                        , (elem (map toUpper word) $ concat $ map permutations $ subsequences $ currentrack sg,"You can't play that word with your letters.")
+                        ]
+          errormsg = snd <$> find (\(cond,msg) -> cond == False) errorchecks
 
--- printgame sg p: print the game board and the rack for player p
-printgame :: ScrabbleGame -> Int -> IO ()
-printgame sg p = do
-    putStrLn $ "    " ++ map fullwidth ['a'..'o']
-    putStrLn boardedge
-    mapM putStrLn [ boardrow sg (board sg !! (n - 1)) n | n <- [1..15] ]
-    putStrLn boardedge
-    putStrLn $ "P" ++ show (turn sg) ++ ": " ++ rackformat (currentrack sg)
+scoreword :: ScrabbleGame -> String -> Int -> Int -> Direction -> Maybe Int
+scoreword sg word n m dir
+    | not $ elem word (dict sg) = Nothing
+    | otherwise                 = Just $ foldl (\a f -> f a) (sum letters) mults
+    -- Horizontal: n increases; Vertical: m increases
+    where (letters,mults) = unzip [ scoreletter sg (word !! i) (if dir == Horizontal then n + i else n) (if dir == Vertical then m + i else m)
+                                  | i <- [0..(length word) - 1] ]
 
-rackformat s = concat $ intersperse " " [ [c] ++ "(" ++ show (letterscore c) ++ ")" | c <- s ]
+-- returns (score,function that represents multiplicative word bonus)
+scoreletter :: ScrabbleGame -> Char -> Int -> Int -> (Int,Int -> Int)
+scoreletter sg c n m = (lettermult base,wordmult)
+    where base = letterscore c
+          bonus = fromMaybe Letter $ snd <$> cellbonus n m
+          lettermult = if bonus == Letter then fromMaybe id $ bonusmult <$> fst <$> cellbonus n m else id
+          wordmult = if bonus == Word then fromMaybe id $ bonusmult <$> fst <$> cellbonus n m else id
 
-boardedge = "   +" ++ (replicate 30 '-') ++ "+"
+data BonusMult = Double | Triple
+    deriving (Show,Eq,Ord)
+data BonusType = Word | Letter
+    deriving (Show,Eq,Ord)
 
--- in these functions, n = row, m = column (starting at 1!)
-boardrow :: ScrabbleGame -> String -> Int -> String
-boardrow sg r n = (if (n < 10) then " " ++ (show n) else show n) ++ " |" ++ concat [ boardcell (r !! (m - 1)) n m | m <- [1..15] ] ++ "|" ++ (extradata sg n)
+bonusmult b
+    | b == Double = (*) 2
+    | b == Triple = (*) 3
 
-extradata :: ScrabbleGame -> Int -> String
-extradata sg r
-    -- show player names above scores
-    | r == 3 = (++) "  " $ concat $ intersperse " " [ leftpad ("P" ++ show p) 4 | p <- [1..length $ racks sg] ]
-    -- show scores
-    | r == 4 = (++) "  " $ concat $ intersperse " " [ leftpad (show score) 4 | score <- scores sg ]
-    -- letters remaining
-    | r == 6 = (++) "  " $ "Letters remaining: " ++ show (length $ bag sg)
-    | otherwise = ""
-
-boardcell :: Char -> Int -> Int -> String
-boardcell c n m
-    | c == ' ' && n == 8 && m == 8 = boardcolor "\xff0a" n m
-    | c == ' '                     = boardcolor "  " n m
-    | otherwise                    = [fullwidth c]
-
-boardcolor :: String -> Int -> Int -> String
-boardcolor s n m = colorstr s (cellcolor n m)
-
-data Bonus = DoubleWord | TripleWord | DoubleLetter | TripleLetter
-
-cellbonus :: Int -> Int -> Maybe Bonus
 cellbonus n m
-    | n == 8 && m == 8                             = Just DoubleWord
-    | elem n [2,14] && elem m [2,14]               = Just DoubleWord
-    | elem n [1,8,15] && elem m [1,8,15]           = Just TripleWord
-    | elem n [2,6,10,14] && elem m [2,6,10,14]     = Just TripleLetter
-    | elem n [7,9] && elem m [7,9]                 = Just DoubleLetter
-    | n == m                                       = Just DoubleWord
-    | n == (16 - m)                                = Just DoubleWord
-    | elem n [1,4,8,12,15] && elem m [1,4,8,12,15] = Just DoubleLetter
-    | elem n [3,7,9,13] && elem m [3,7,9,13]       = Just DoubleLetter
+    | n == 8 && m == 8                             = Just (Double,Word)
+    | elem n [2,14] && elem m [2,14]               = Just (Double,Word)
+    | elem n [1,8,15] && elem m [1,8,15]           = Just (Triple,Word)
+    | elem n [2,6,10,14] && elem m [2,6,10,14]     = Just (Triple,Letter)
+    | elem n [7,9] && elem m [7,9]                 = Just (Double,Letter)
+    | n == m                                       = Just (Double,Word)
+    | n == (16 - m)                                = Just (Double,Word)
+    | elem n [1,4,8,12,15] && elem m [1,4,8,12,15] = Just (Double,Letter)
+    | elem n [3,7,9,13] && elem m [3,7,9,13]       = Just (Double,Letter)
     | otherwise                                    = Nothing
 
-bonuscolor (Just DoubleWord) = Just Pink
-bonuscolor (Just TripleWord) = Just Red
-bonuscolor (Just DoubleLetter) = Just Cyan
-bonuscolor (Just TripleLetter) = Just Blue
-bonuscolor Nothing = Nothing
+bonuscolor (Double,Word) = Pink
+bonuscolor (Triple,Word) = Red
+bonuscolor (Double,Letter) = Cyan
+bonuscolor (Triple,Letter) = Blue
 
-cellcolor n m = bonuscolor $ cellbonus n m
+cellcolor n m = bonuscolor <$> cellbonus n m
 
 ----------------------------------------
 -- character rendering functions / stuff
@@ -160,14 +185,16 @@ data Play = Play { word :: String
                  , dir :: Direction
                  } deriving (Show,Eq,Ord)
 
-getcommanderror :: String -> ScrabbleGame -> [String] -> IO Command
-getcommanderror msg sg dict = do
+colnum x = (ord $ toLower x) - (ord 'a') + 1
+
+getcommanderror :: String -> ScrabbleGame -> IO Command
+getcommanderror msg sg = do
     putStrLn msg
-    getcommand sg dict
+    getcommand sg
 invalidcommand = getcommanderror "Invalid command."
 
-getcommand :: ScrabbleGame -> [String] -> IO Command
-getcommand sg dict = do
+getcommand :: ScrabbleGame -> IO Command
+getcommand sg = do
     putStrLn "Commands: play [word] x y | quit"
     putStr "> "
     hFlush stdout
@@ -178,17 +205,15 @@ getcommand sg dict = do
             "quit" -> return QuitCommand
             "play" -> do
                 if length command == 4
-                    then if elem (command !! 1) dict
-                        then return QuitCommand
-                        else getcommanderror ((command !! 1) ++ " is not a valid word.") sg dict
-                    else invalidcommand sg dict
-            _ -> invalidcommand sg dict
-        else invalidcommand sg dict
+                    then return QuitCommand
+                    else invalidcommand sg
+            _ -> invalidcommand sg
+        else invalidcommand sg
 
-gameloop :: ScrabbleGame -> [String] -> IO ()
-gameloop sg dict = do
-    printgame sg 0
-    command <- getcommand sg dict
+gameloop :: ScrabbleGame -> IO ()
+gameloop sg = do
+    putStrLn $ show sg
+    command <- getcommand sg
     case command of
         QuitCommand -> return ()
 
@@ -199,5 +224,5 @@ main = do
     when (read num_players < 1) $ error "too few players"
     when (read num_players > 4) $ error "too many players"
     g <- getStdGen
-    dict <- validwords
-    gameloop (newgame (read num_players) g) dict
+    words <- validwords
+    gameloop (newgame (read num_players) g words)
