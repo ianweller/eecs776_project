@@ -99,17 +99,18 @@ scoreplay sg (Play word (x,y) dir)
         Left "Not implemented yet."
 
 scorefirstplay :: ScrabbleGame -> Play -> Either String Int
-scorefirstplay sg (Play word (x,y) dir) =
+scorefirstplay sg (Play _word (x,y) dir) =
     if errormsg == Nothing
-        then fromMaybe (Left $ "\"" ++ word ++ "\" is not a valid word.") $ Right <$> scoreword sg word (colnum x) y dir
+        then fromMaybe (Left $ "\"" ++ word ++ "\" is not a valid word.") $ Right <$> scoreword sg _word (colnum x) y dir
         else Left $ fromMaybe "Internal scoring error." errormsg
-    where n = colnum x
+    where word = (map toUpper _word)
+          n = colnum x
           errorchecks = [ (dir == Horizontal,"The first play must be horizontal.")
                         , (y == 8,"The first play must be on row 8.")
                         , (n > 0 && n + (length word) <= 16,"The word would fall off the board.")
                         , (n <= 8 && n + (length word) >= 9,"The first play must cover the square h8.")
                         , (length word > 0,"You somehow entered a 0-length word and we are all confused.")
-                        , (elem (map toUpper word) $ concat $ map permutations $ subsequences $ currentrack sg,"You can't play that word with your letters.")
+                        , (elem word $ concat $ map permutations $ subsequences $ currentrack sg,"You can't play that word with your letters.")
                         ]
           errormsg = snd <$> find (\(cond,msg) -> cond == False) errorchecks
 
