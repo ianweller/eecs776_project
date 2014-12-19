@@ -216,9 +216,9 @@ data Play = Play { word :: String
 
 colnum x = (ord $ toLower x) - (ord 'a') + 1
 readdir d
-    | elem d ["h","H","right"] = Just Horizontal
-    | elem d ["v","V","down"]  = Just Vertical
-    | otherwise                = Nothing
+    | elem d ["h","H","right","across"] = Just Horizontal
+    | elem d ["v","V","down"]           = Just Vertical
+    | otherwise                         = Nothing
 
 getcommanderror :: String -> ScrabbleGame -> IO Command
 getcommanderror msg sg = do
