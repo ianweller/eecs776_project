@@ -24,6 +24,7 @@ There are some discrepancies between actual Scrabble rules and this game:
   Scrabble will go on forever. It is eternal. Scrabble has seen both life and
   death but has never experienced the latter.
 * Using all your letters (a "bingo") does not give you an extra 50 points.
+
 These are mostly somewhat easy to implement/fix but if you check the commit
 time for when this README was added, you will understand why these problems
 were not resolved. I believe the project is sufficiently "difficult" enough
