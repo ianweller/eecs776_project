@@ -12,6 +12,13 @@ import Data.Maybe
 import System.IO
 import System.Random
 
+jointuple a b = (a,b)
+replacel n l with = concat[take n l,take (length l - n) with,drop (n + length with) l]
+replace n l with = replacel n l [with]
+replacef n l f = replace n l (f (l !! n))
+-- http://stackoverflow.com/a/5121537
+mayberead = fmap fst . listToMaybe . reads
+
 -- Type for storing the Scrabble game state
 data ScrabbleGame = ScrabbleGame { board :: [[Char]]
                                  , racks :: [[Char]]
@@ -46,6 +53,22 @@ instance Show ScrabbleGame where
                         | otherwise                    = [fullwidth c]
                     boardcolor s n m = colorstr s (cellcolor n m)
 
+-- newgame p: set up a new board with p players
+newgame :: Int -> StdGen -> [String] -> ScrabbleGame
+newgame p g words =
+    --let bag = chunksOf 7 $ shuffle letterset
+    let bag = chunksOf 7 (shuffle letterset g)
+    in  ScrabbleGame { board = replicate 15 $ replicate 15 ' '
+                     , racks = take p bag
+                     , scores = replicate p 0
+                     , bag = concat $ drop p bag
+                     , turn = 1
+                     , dict = words
+                     }
+
+currentrack sg = racks sg !! ((turn sg) - 1)
+players sg = length (racks sg)
+
 -- remove element from a list by index
 removeElement n xs = [ xs !! (x - 1) | x <- [1..length xs], x - 1 /= n ]
 
@@ -76,35 +99,27 @@ validwords = do
     f <- readFile "/usr/share/dict/words"
     return $ filter validword $ lines f
 
--- newgame p: set up a new board with p players
-newgame :: Int -> StdGen -> [String] -> ScrabbleGame
-newgame p g words =
-    --let bag = chunksOf 7 $ shuffle letterset
-    let bag = chunksOf 7 (shuffle letterset g)
-    in  ScrabbleGame { board = replicate 15 $ replicate 15 ' '
-                     , racks = take p bag
-                     , scores = replicate p 0
-                     , bag = concat $ drop p bag
-                     , turn = 1
-                     , dict = words
-                     }
-
-currentrack :: ScrabbleGame -> [Char]
-currentrack sg = racks sg !! ((turn sg) - 1)
-
-scoreplay :: ScrabbleGame -> Play -> Either String Int
+scoreplay :: ScrabbleGame -> Play -> Either String (ScrabbleGame,Int)
 scoreplay sg (Play word (x,y) dir)
     | board sg == (replicate 15 $ replicate 15 ' ') = scorefirstplay sg (Play word (x,y) dir)
     | otherwise =
         Left "Not implemented yet."
 
-scorefirstplay :: ScrabbleGame -> Play -> Either String Int
+scorefirstplay :: ScrabbleGame -> Play -> Either String (ScrabbleGame,Int)
 scorefirstplay sg (Play _word (x,y) dir) =
     if errormsg == Nothing
-        then fromMaybe (Left $ "\"" ++ word ++ "\" is not a valid word.") $ Right <$> scoreword sg _word (colnum x) y dir
+        then fromMaybe (Left $ "\"" ++ word ++ "\" is not a valid word.") $ Right <$> jointuple sg' <$> score
         else Left $ fromMaybe "Internal scoring error." errormsg
     where word = (map toUpper _word)
           n = colnum x
+          score = scoreword sg _word n y dir
+          sg' = ScrabbleGame { board = replace 7 (board sg) $ replacel (n - 1) (board sg !! 7) word
+                             , racks = replace ((turn sg) - 1) (racks sg) $ foldl (flip delete) (currentrack sg) word
+                             , scores = replacef ((turn sg) - 1) (scores sg) $ (+) (fromMaybe 0 score)
+                             , bag = drop (length word) (bag sg)
+                             , turn = (mod (turn sg) (players sg)) + 1
+                             , dict = dict sg
+                             }
           errorchecks = [ (dir == Horizontal,"The first play must be horizontal.")
                         , (y == 8,"The first play must be on row 8.")
                         , (n > 0 && n + (length word) <= 16,"The word would fall off the board.")
@@ -180,13 +195,17 @@ leftpad s n = (replicate (n - length s) ' ') ++ s
 
 data Direction = Horizontal | Vertical
     deriving (Show,Eq,Ord)
-data Command = QuitCommand | PlayCommand
+data Command = QuitCommand | PlayCommand Play
 data Play = Play { word :: String
                  , xy :: (Char,Int)
                  , dir :: Direction
                  } deriving (Show,Eq,Ord)
 
 colnum x = (ord $ toLower x) - (ord 'a') + 1
+readdir d
+    | elem d ["h","H","right"] = Just Horizontal
+    | elem d ["v","V","down"]  = Just Vertical
+    | otherwise                = Nothing
 
 getcommanderror :: String -> ScrabbleGame -> IO Command
 getcommanderror msg sg = do
@@ -196,7 +215,7 @@ invalidcommand = getcommanderror "Invalid command."
 
 getcommand :: ScrabbleGame -> IO Command
 getcommand sg = do
-    putStrLn "Commands: play [word] x y | quit"
+    putStrLn "Commands: play [word] xy [h|v] | quit"
     putStr "> "
     hFlush stdout
     command_str <- getLine
@@ -205,18 +224,37 @@ getcommand sg = do
         then case (command !! 0) of
             "quit" -> return QuitCommand
             "play" -> do
-                if length command == 4
-                    then return QuitCommand
+                if and [length command == 4,length (command !! 2) == 2]
+                    then do
+                        let xy = command !! 2
+                        let x = xy !! 0
+                        let y = mayberead $ drop 1 xy
+                        let dir = readdir $ command !! 3
+                        if (elem x ['a'..'o']) || (elem (fromMaybe 0 y) [1..15])
+                            then if dir == Nothing
+                                 then getcommanderror "Invalid dir -- use \"h\" or \"v\"." sg
+                                 else return $ PlayCommand (Play { word = command !! 1
+                                                                 , xy = (x,fromMaybe 0 y)
+                                                                 , dir = fromMaybe Horizontal dir
+                                                                 })
+                            else getcommanderror "Invalid xy -- x must be in ['a'..'o'], y must be in [1..15]." sg
                     else invalidcommand sg
             _ -> invalidcommand sg
         else invalidcommand sg
 
-gameloop :: ScrabbleGame -> IO ()
-gameloop sg = do
-    putStrLn $ show sg
+gameloop = gameloop' True
+
+gameloop' :: Bool -> ScrabbleGame -> IO ()
+gameloop' showboard sg = do
+    when showboard (putStrLn $ show sg)
     command <- getcommand sg
     case command of
         QuitCommand -> return ()
+        PlayCommand p -> do
+            let result = scoreplay sg p
+            either (\msg -> do { putStrLn msg; gameloop' False sg })
+                   (\(sg',score) -> do { putStrLn $ "Scored " ++ (show score) ++ " points!"; gameloop sg' })
+                   result
 
 main = do
     putStr "How many players? "
