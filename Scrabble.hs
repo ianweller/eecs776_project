@@ -100,42 +100,55 @@ validwords = do
     return $ filter validword $ lines f
 
 scoreplay :: ScrabbleGame -> Play -> Either String (ScrabbleGame,Int)
-scoreplay sg (Play word (x,y) dir)
-    | board sg == (replicate 15 $ replicate 15 ' ') = scorefirstplay sg (Play word (x,y) dir)
-    | otherwise =
-        Left "Not implemented yet."
-
-scorefirstplay :: ScrabbleGame -> Play -> Either String (ScrabbleGame,Int)
-scorefirstplay sg (Play _word (x,y) dir) =
-    if errormsg == Nothing
-        then fromMaybe (Left $ "\"" ++ word ++ "\" is not a valid word.") $ Right <$> jointuple sg' <$> score
-        else Left $ fromMaybe "Internal scoring error." errormsg
-    where word = (map toUpper _word)
-          n = colnum x
-          score = scoreword sg _word n y dir
-          sg' = ScrabbleGame { board = replace 7 (board sg) $ replacel (n - 1) (board sg !! 7) word
-                             , racks = replace ((turn sg) - 1) (racks sg) $ foldl (flip delete) (currentrack sg) word
-                             , scores = replacef ((turn sg) - 1) (scores sg) $ (+) (fromMaybe 0 score)
-                             , bag = drop (length word) (bag sg)
-                             , turn = (mod (turn sg) (players sg)) + 1
-                             , dict = dict sg
-                             }
-          errorchecks = [ (dir == Horizontal,"The first play must be horizontal.")
-                        , (y == 8,"The first play must be on row 8.")
-                        , (n > 0 && n + (length word) <= 16,"The word would fall off the board.")
-                        , (n <= 8 && n + (length word) >= 9,"The first play must cover the square h8.")
-                        , (length word > 0,"You somehow entered a 0-length word and we are all confused.")
-                        , (elem word $ concat $ map permutations $ subsequences $ currentrack sg,"You can't play that word with your letters.")
-                        ]
-          errormsg = snd <$> find (\(cond,msg) -> cond == False) errorchecks
-
-scoreword :: ScrabbleGame -> String -> Int -> Int -> Direction -> Maybe Int
-scoreword sg word n m dir
-    | not $ elem word (dict sg) = Nothing
-    | otherwise                 = Just $ foldl (\a f -> f a) (sum letters) mults
-    -- Horizontal: n increases; Vertical: m increases
-    where (letters,mults) = unzip [ scoreletter sg (word !! i) (if dir == Horizontal then n + i else n) (if dir == Vertical then m + i else m)
-                                  | i <- [0..(length word) - 1] ]
+scoreplay sg (Play _word (x,y) dir)
+    | not $ elem (map toLower _word) (dict sg) = Left "That's not a word!"
+    | otherwise                                =
+        either (\msg -> Left msg)
+               (\(sg,score) -> Right (ScrabbleGame { board = board sg
+                                                   , racks = replace ((turn sg) - 1) (racks sg) $
+                                                             (currentrack sg) ++ (take (7 - (length $ currentrack sg)) (bag sg))
+                                                   , scores = replacef ((turn sg) - 1) (scores sg) $ (+) score
+                                                   , bag = drop (7 - (length $ currentrack sg)) (bag sg)
+                                                   , turn = (mod (turn sg) (players sg)) + 1
+                                                   , dict = dict sg
+                                                   }, score))
+               $ scorer sg 0 id n m word
+    -- in these functions, n = row, m = column (starting at 1!)
+    -- Vertical: n increases; Horizontal: m increases
+    where
+        word = map toUpper _word
+        n = y
+        m = colnum x
+        errorchecks = [ (n > 0 && m > 0,"The word would fall off the board.")
+                      , (length word > 0,"You somehow entered a 0-length word and we are all confused.")
+                      ] ++ firstplaychecks ++ hchecks ++ vchecks
+        firstplaychecks = if board sg == (replicate 15 $ replicate 15 ' ')
+                              then [ (dir == Horizontal,"The first play must be horizontal.")
+                                   , (n == 8,"The first play must be on row 8.")
+                                   , (n <= 8 && n + (length word) >= 9,"The first play must cover the square h8.")
+                                   ]
+                              else []
+        hchecks = if dir == Horizontal then [(m + (length word) <= 16,"The word would fall off the board.")] else []
+        vchecks = if dir == Vertical   then [(n + (length word) <= 16,"The word would fall off the board.")] else []
+        errormsg = snd <$> find (\(cond,msg) -> cond == False) errorchecks
+        scorer sg score mult n m [] = Right (sg,mult score)
+        scorer sg score mult n m (c:cs) =
+            if currentc == ' '
+                then if elem c (currentrack sg) then scorer' else Left "You don't have the letters to play that word."
+                else if currentc == c then scorer' else Left "There's another letter in the way."
+            where currentc = ((board sg) !! (n - 1)) !! (m - 1)
+                  (score',mult') = scoreletter sg c n m
+                  sg' = ScrabbleGame { board = replace (n - 1) (board sg) $ replace (m - 1) (board sg !! (n - 1)) c
+                                     , racks = if currentc == c then racks sg
+                                                   else replace ((turn sg) - 1) (racks sg) $ delete c (currentrack sg)
+                                     , scores = scores sg
+                                     , bag = bag sg
+                                     , turn = turn sg
+                                     , dict = dict sg
+                                     }
+                  n' = if dir == Vertical then n + 1 else n
+                  m' = if dir == Horizontal then m + 1 else m
+                  scorer' = scorer sg' (score + score') (mult' . mult) n' m' cs
 
 -- returns (score,function that represents multiplicative word bonus)
 scoreletter :: ScrabbleGame -> Char -> Int -> Int -> (Int,Int -> Int)
@@ -224,7 +237,7 @@ getcommand sg = do
         then case (command !! 0) of
             "quit" -> return QuitCommand
             "play" -> do
-                if and [length command == 4,length (command !! 2) == 2]
+                if length command == 4
                     then do
                         let xy = command !! 2
                         let x = xy !! 0
