@@ -1,6 +1,8 @@
 This is [Ian Weller](https://github.com/ianweller)'s final project for EECS 776 at KU.
 It's a rudimentary Scrabble-like game, written in Haskell, playable on the console.
 
+![](https://cloud.githubusercontent.com/assets/52814/5503147/392ad192-8739-11e4-8780-6f7a14370dc4.png)
+
 Scrabble.hs requires the [random](http://hackage.haskell.org/package/random) library.
 This is installed on the EECS Linux machines. It's used to shuffle the letter bag.
 
