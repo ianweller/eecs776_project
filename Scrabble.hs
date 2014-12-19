@@ -103,16 +103,18 @@ scoreplay :: ScrabbleGame -> Play -> Either String (ScrabbleGame,Int)
 scoreplay sg (Play _word (x,y) dir)
     | not $ elem (map toLower _word) (dict sg) = Left "That's not a word!"
     | otherwise                                =
-        either (\msg -> Left msg)
-               (\(sg,score) -> Right (ScrabbleGame { board = board sg
-                                                   , racks = replace ((turn sg) - 1) (racks sg) $
-                                                             (currentrack sg) ++ (take (7 - (length $ currentrack sg)) (bag sg))
-                                                   , scores = replacef ((turn sg) - 1) (scores sg) $ (+) score
-                                                   , bag = drop (7 - (length $ currentrack sg)) (bag sg)
-                                                   , turn = (mod (turn sg) (players sg)) + 1
-                                                   , dict = dict sg
-                                                   }, score))
-               $ scorer sg 0 id n m word
+        if errormsg == Nothing
+            then either (\msg -> Left msg)
+                        (\(sg,score) -> Right (ScrabbleGame { board = board sg
+                                                            , racks = replace ((turn sg) - 1) (racks sg) $
+                                                                      (currentrack sg) ++ (take (7 - (length $ currentrack sg)) (bag sg))
+                                                            , scores = replacef ((turn sg) - 1) (scores sg) $ (+) score
+                                                            , bag = drop (7 - (length $ currentrack sg)) (bag sg)
+                                                            , turn = (mod (turn sg) (players sg)) + 1
+                                                            , dict = dict sg
+                                                            }, score))
+                        $ scorer sg 0 id n m word
+            else Left $ fromMaybe "Internal scoring error." errormsg
     -- in these functions, n = row, m = column (starting at 1!)
     -- Vertical: n increases; Horizontal: m increases
     where
@@ -121,13 +123,17 @@ scoreplay sg (Play _word (x,y) dir)
         m = colnum x
         errorchecks = [ (n > 0 && m > 0,"The word would fall off the board.")
                       , (length word > 0,"You somehow entered a 0-length word and we are all confused.")
-                      ] ++ firstplaychecks ++ hchecks ++ vchecks
-        firstplaychecks = if board sg == (replicate 15 $ replicate 15 ' ')
-                              then [ (dir == Horizontal,"The first play must be horizontal.")
-                                   , (n == 8,"The first play must be on row 8.")
-                                   , (n <= 8 && n + (length word) >= 9,"The first play must cover the square h8.")
-                                   ]
-                              else []
+                      ] ++ hfirstplaychecks ++ vfirstplaychecks ++ hchecks ++ vchecks
+        hfirstplaychecks = if board sg == (replicate 15 $ replicate 15 ' ') && dir == Horizontal
+                               then [ (n == 8,"The first play must be on row 8.")
+                                    , (m <= 8 && m + (length word) >= 9,"The first play must cover the square h8.")
+                                    ]
+                               else []
+        vfirstplaychecks = if board sg == (replicate 15 $ replicate 15 ' ') && dir == Vertical
+                               then [ (m == 8,"The first play must be on column h.")
+                                    , (n <= 8 && n + (length word) >= 9,"The first play must cover the square h8.")
+                                    ]
+                               else []
         hchecks = if dir == Horizontal then [(m + (length word) <= 16,"The word would fall off the board.")] else []
         vchecks = if dir == Vertical   then [(n + (length word) <= 16,"The word would fall off the board.")] else []
         errormsg = snd <$> find (\(cond,msg) -> cond == False) errorchecks
