@@ -7,7 +7,6 @@ import Control.Monad
 import Data.Char
 import Data.Either
 import Data.List
-import Data.List.Split
 import Data.Maybe
 import System.IO
 import System.Random
@@ -18,6 +17,9 @@ replace n l with = replacel n l [with]
 replacef n l f = replace n l (f (l !! n))
 -- http://stackoverflow.com/a/5121537
 mayberead = fmap fst . listToMaybe . reads
+
+chunksOf n [] = []
+chunksOf n xs = (take n xs) : (chunksOf n $ drop 7 xs)
 
 -- Type for storing the Scrabble game state
 data ScrabbleGame = ScrabbleGame { board :: [[Char]]
